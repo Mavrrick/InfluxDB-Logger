@@ -90,19 +90,17 @@ def setupMain() {
         }
         
         section("Event Database Write Management") {
+            
             input "writeInterval", "enum", title:"How often to write to db (minutes)", defaultValue: "5", required: true,
                 options: ["1",  "2", "3", "4", "5", "10", "15"]
 
             input "prefWriteQueueLimit", "number", title:"Write Interval Queue Size Limit", defaultValue: 50, required: true
             
             input "syncDelay", "number", title:"Seconds before writing memory to state backup value", defaultValue: 20, required: false
+                       
         }
 
-        section("Input Format Preference:") {
-            input "accessAllAttributes", "bool", title:"Get Access To All Attributes?", defaultValue: false, required: true, submitOnChange: true
-        }
 
-        if (!accessAllAttributes) {
             section("Devices To Monitor:", hideable:false) {
                 input "accelerometers", "capability.accelerationSensor", title: "Accelerometers", multiple: true, required: false
                 input "alarms", "capability.alarm", title: "Alarms", multiple: true, required: false
@@ -145,30 +143,7 @@ def setupMain() {
                 input "waterSensors", "capability.waterSensor", title: "Water Sensors", multiple: true, required: false
                 input "windowShades", "capability.windowShade", title: "Window Shades", multiple: true, required: false
             }
-        } else {
-            section("Devices To Monitor:", hideable:false) {
-                input name: "allDevices", type: "capability.*", title: "Selected Devices", multiple: true, required: false, submitOnChange: true
-            }
-            state.selectedAttr = [:]
-            settings.allDevices.each { deviceName ->
-                if (deviceName) {
-                    deviceId = deviceName.getId()
-                    attr = deviceName.getSupportedAttributes().unique()
-                    if (attr) {
-                        state.options = []
-                        index = 0
-                        attr.each { at ->
-                            state.options[index] = "${at}"
-                            index = index + 1
-                        }
-                        section("$deviceName", hideable: true) {
-                            input name:"attrForDev$deviceId", type: "enum", title: "$deviceName", options: state.options, multiple: true, required: false, submitOnChange: true
-                        }
-                        state.selectedAttr[deviceId] = settings["attrForDev" + deviceId]
-                    }
-                }
-            }
-        }
+        
 
         section("Event Subscription Options:") {
             input "filterEvents", "bool", title:"Only log events when the value changes", defaultValue: true, required: true, submitOnChange: true
@@ -279,8 +254,11 @@ def updated() {
 
     // Configure Scheduling:
 //    state.softPollingInterval = settings.prefSoftPollingInterval.toInteger()
+
+
     state.writeInterval = settings.writeInterval
-    manageSchedules()
+        manageSchedules() 
+
 
     // Configure Subscriptions:
     manageSubscriptions()
@@ -308,21 +286,6 @@ def updated() {
 /*****************************************************************************************************************
  *  Event Handlers:
  *****************************************************************************************************************/
-
-/**
- *  handleModeEvent(evt)
- *
- *  Log Mode changes.
- **/
-def handleModeEvent(evt) {
-    logger("handleModeEvent(): Mode changed to: ${evt.value}", "info")
-
-    def locationName = escapeStringForInfluxDB(location.name)
-    def mode = '"' + escapeStringForInfluxDB(evt.value) + '"'
-    long eventTimestamp = evt.unixTime * 1e6       // Time is in milliseconds, but InfluxDB expects nanoseconds
-    def data = "_stMode,locationName=${locationName} mode=${mode} ${eventTimestamp}"
-    queueToInfluxDb(data)
-}
 
 /**
  *  handleEvent(evt)
@@ -549,115 +512,6 @@ def handleEvent(evt) {
  *  Main Commands:
  *****************************************************************************************************************/
 
-/**
- *  softPoll()
- *
- *  Executed by schedule.
- *
- *  Forces data to be posted to InfluxDB (even if an event has not been triggered).
- *  Doesn't poll devices, just builds a fake event to pass to handleEvent().
- *
- *  Also calls LogSystemProperties().
- **/
-def softPoll() {
-    logger("softPoll()", "trace")
-
-    logSystemProperties()
-    if (!accessAllAttributes) {
-        // Iterate over each attribute for each device, in each device collection in deviceAttributes:
-        def devs // temp variable to hold device collection.
-        state.deviceAttributes.each { da ->
-            devs = settings."${da.devices}"
-            if (devs && (da.attributes)) {
-                devs.each { d ->
-                    da.attributes.each { attr ->
-                        if (d.hasAttribute(attr) && d.latestState(attr)?.value != null) {
-                            logger("softPoll(): Softpolling device ${d} for attribute: ${attr}", "info")
-                            long timeNow = new Date().time
-                            // Send fake event to handleEvent():
-                            handleEvent([
-                                name: attr,
-                                value: d.latestState(attr)?.value,
-                                unit: d.latestState(attr)?.unit,
-                                device: d,
-                                deviceId: d.id,
-                                displayName: d.displayName,
-                                unixTime: timeNow
-                            ])
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        state.selectedAttr.each { entry ->
-            d = getDeviceObj(entry.key)
-            entry.value.each { attr ->
-                if (d.hasAttribute(attr) && d.latestState(attr)?.value != null) {
-                    logger("softPoll(): Softpolling device ${d} for attribute: ${attr}", "info")
-                    long timeNow = new Date().time
-                    // Send fake event to handleEvent():
-                    handleEvent([
-                        name: attr,
-                        value: d.latestState(attr)?.value,
-                        unit: d.latestState(attr)?.unit,
-                        device: d,
-                        deviceId: d.id,
-                        displayName: d.displayName,
-                        unixTime: timeNow
-                    ])
-                }
-            }
-        }
-    }
-}
-
-/**
- *  logSystemProperties()
- *
- *  Generates measurements for SmartThings system (hubs and locations) properties.
- **/
-def logSystemProperties() {
-    logger("logSystemProperties()", "trace")
-
-    def locationName = '"' + escapeStringForInfluxDB(location.name) + '"'
-    long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds when pushed to InfluxDB
-
-    // Location Properties:
-    if (prefLogLocationProperties) {
-        try {
-            def tz = '"' + escapeStringForInfluxDB(location.timeZone.ID.toString()) + '"'
-            def mode = '"' + escapeStringForInfluxDB(location.mode) + '"'
-            def times = getSunriseAndSunset()
-            def srt = '"' + times.sunrise.format("HH:mm", location.timeZone) + '"'
-            def sst = '"' + times.sunset.format("HH:mm", location.timeZone) + '"'
-
-            def data = "_heLocation,locationName=${locationName},latitude=${location.latitude},longitude=${location.longitude},timeZone=${tz} mode=${mode},sunriseTime=${srt},sunsetTime=${sst} ${timeNow}"
-            queueToInfluxDb(data)
-            //log.debug("LocationData = ${data}")
-        } catch (e) {
-            logger("logSystemProperties(): Unable to log Location properties: ${e}", "error")
-        }
-    }
-
-    // Hub Properties:
-    if (prefLogHubProperties) {
-        location.hubs.each { h ->
-            try {
-                def hubName = '"' + escapeStringForInfluxDB(h.name.toString()) + '"'
-                def hubIP = '"' + escapeStringForInfluxDB(h.localIP.toString()) + '"'
-                def firmwareVersion =  '"' + escapeStringForInfluxDB(h.firmwareVersionString) + '"'
-
-                def data = "_heHub,locationName=${locationName},hubName=${hubName},hubIP=${hubIP} firmwareVersion=${firmwareVersion} ${timeNow}"
-                //log.debug("HubData = ${data}")
-                queueToInfluxDb(data)
-            } catch (e) {
-                logger("logSystemProperties(): Unable to log Hub properties: ${e}", "error")
-            }
-        }
-    }
-}
-
 def queueToInfluxDb(data) {
     // Add timestamp (influxdb does this automatically, but since we're batching writes, we need to add it
     long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds
@@ -683,8 +537,7 @@ def queueToInfluxDb(data) {
 
     if (queueSize > (settings.prefWriteQueueLimit ?: 50)) {
         logger("Queue size is too big, triggering write now", "info")
-//        parent.state.loggerQueue = loggerQueueMem
-        writeQueuedDataToInfluxDb()
+        writeQueuedDataToInfluxDb()   
     }     
 }
 
@@ -710,25 +563,11 @@ def writeQueuedDataToInfluxDb() {
     finally {
         mutex.release()
     }
+
     logger("Calling Parent App to post ${writeData}", "trace")
     parent.postToInfluxDB(writeData)
-
+    
 }
-
-/* def queueToInfluxDb(data) {
-    loggerQueue = state.loggerQueue
-    if (loggerQueue == null) {
-        // Failsafe if coming from an old version
-        loggerQueue = []
-        state.loggerQueue = loggerQueue
-    }
-
-    loggerQueue.add(data)
-    if (loggerQueue.size() > (settings.prefWriteQueueLimit ?: 100)) {
-        logger("Queue size is too big, triggering write now", "info")
-        writeQueuedDataToInfluxDb()
-    }
-} */
 
 def writeQueuedDataToInfluxDbForce() {
     loggerQueue = state.loggerQueue
@@ -749,113 +588,16 @@ def writeQueuedDataToInfluxDbForce() {
     loggerQueue.clear()
 } 
 
-/**
- *  postToInfluxDB()
- *
- *  Posts data to InfluxDB.
- *
- *  Uses hubAction instead of httpPost() in case InfluxDB server is on the same LAN as the Smartthings Hub.
- **/
-def postToInfluxDB(data) {
-    if (state.uri == null) {
-        // Failsafe if using an old config
-        setupDB()
-    }
-
-    logger("postToInfluxDB(): Posting data to InfluxDB: ${state.uri}, Data: [${data}]", "info")
-
-    // Hubitat Async http Post
-    try {
-        def postParams = [
-            uri: state.uri,
-            requestContentType: 'application/json',
-            contentType: 'application/json',
-            headers: state.headers,
-            body : data
-        ]
-        asynchttpPost('handleInfluxResponse', postParams)
-    } catch (e) {
-        logger("postToInfluxDB(): Something went wrong when posting: ${e}", "error")
-    }
-}
-
-/**
- *  handleInfluxResponse()
- *
- *  Handles response from post made in postToInfluxDB().
- **/
-def handleInfluxResponse(hubResponse, data) {
-    //logger("postToInfluxDB(): status of post call is: ${hubResponse.status}", "info")
-    if (hubResponse.status >= 400) {
-        logger("postToInfluxDB(): Something went wrong! Response from InfluxDB: Status: ${hubResponse.status}, Headers: ${hubResponse.headers}, Data: ${data}", "error")
-    }
-}
-
 /*****************************************************************************************************************
  *  Private Helper Functions:
  *****************************************************************************************************************/
-
 /**
- *  setupDB()
- *
- *  Set up the database uri and header state variables.
- **/
-private setupDB() {
-    String uri
-    def headers = [:]
-
-    if (settings?.prefDatabaseTls) {
-        uri = "https://"
-    } else {
-        uri = "http://"
-    }
-
-    uri += settings.prefDatabaseHost
-    if (settings?.prefDatabasePort) {
-        uri += ":" + settings.prefDatabasePort
-    }
-
-    if (settings?.prefInfluxVer == "2") {
-        uri += "/api/v2/write?org=${settings.prefOrg}&bucket=${settings.prefBucket}"
-    } else {
-        // Influx version 1
-        uri += "/write?db=${settings.prefDatabaseName}"
-    }
-
-    if (settings.prefAuthType == null || settings.prefAuthType == "basic") {
-        if (settings.prefDatabaseUser && settings.prefDatabasePass) {
-            def userpass = "${settings.prefDatabaseUser}:${settings.prefDatabasePass}"
-            headers.put("Authorization", "Basic " + userpass.bytes.encodeBase64().toString())
-        }
-    } else if (settings.prefAuthType == "token") {
-        headers.put("Authorization", "Token ${settings.prefDatabaseToken}")
-    }
-
-    state.uri = uri
-    state.headers = headers
-
-    logger("New URI: ${uri}", "info")
-
-    // Clean up old state vars if present
-    state.remove("databaseHost")
-    state.remove("databasePort")
-    state.remove("databaseName")
-    state.remove("databasePass")
-    state.remove("databaseUser")
-    state.remove("path")
-}
-
-/**
- * stateloggersync
+ * stateLoggerSync
  *
  * Synchronizes logger queue to state value to minimize data loss
  **/
 private stateLoggerSync(){ 
     logger("stateLoggerSync()", "trace")
-//    logger("stateLoggerSync() Mem is ${loggerQueueMem}", "trace")
-//    def dif = loggerQueueMem - state.loggerQueue
-//    logger("stateLoggerSync() Difference is ${dif}", "trace")
-//    logger("stateLoggerSync() State size is ${state.loggerQueue.size()} and mem size is ${loggerQueueMem.size()} dif size is ${dif.size()}", "trace") 
     if (state.loggerQueue.size() < loggerQueueMem.size()) {
         state.loggerQueue = loggerQueueMem
     } else if (state.loggerQueue.size() > loggerQueueMem.size()) {
@@ -882,7 +624,7 @@ private manageSchedules() {
     def randomOffset = 0
 
     try {
-        unschedule(softPoll)
+        unschedule(syncDelay)
         unschedule(writeQueuedDataToInfluxDb)
     }
     catch (e) {
@@ -890,17 +632,14 @@ private manageSchedules() {
     }
 
     randomOffset = rand.nextInt(50)
-/*    if (state.softPollingInterval > 0) {
-        logger("manageSchedules(): Scheduling softpoll to run every ${state.softPollingInterval} minutes (offset of ${randomOffset} seconds).", "trace")
-        schedule("${randomOffset} 0/${state.softPollingInterval} * * * ?", "softPoll")
-    } */
 
     randomOffset = randomOffset + 8
     schedule("${randomOffset} 0/${state.writeInterval} * * * ?", "writeQueuedDataToInfluxDb")
     
     if (settings.syncDelay > 0) {
-    randomOffset = randomOffset + 15
-    schedule("0/${settings.syncDelay} * * * * ?", "stateLoggerSync")
+        randomOffset = randomOffset + 15
+        schedule("0/${settings.syncDelay} * * * * ?", "stateLoggerSync")
+         
     }
 }
 
@@ -915,10 +654,6 @@ private manageSubscriptions() {
     // Unsubscribe:
     unsubscribe()
 
-    // Subscribe to mode events:
-    if (prefLogModeEvents) subscribe(location, "mode", handleModeEvent)
-
-    if (!accessAllAttributes) {
         // Subscribe to device attributes (iterate over each attribute for each device collection in state.deviceAttributes):
         def devs // dynamic variable holding device collection.
         state.deviceAttributes.each { da ->
@@ -931,15 +666,6 @@ private manageSubscriptions() {
                 }
             }
         }
-    } else {
-        state.selectedAttr.each { entry ->
-            d = getDeviceObj(entry.key)
-            entry.value.each { attr ->
-                logger("manageSubscriptions(): Subscribing to attribute: ${attr}, for device: ${d}", "info")
-                subscribe(d, attr, handleEvent, ["filterEvents": filterEvents])
-            }
-        }
-    }
 }
 
 /**
