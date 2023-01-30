@@ -220,9 +220,6 @@ def updated() {
     // Update internal state:
     state.loggingLevelIDE = (settings.configLoggingLevelIDE) ? settings.configLoggingLevelIDE.toInteger() : 3
 
-    // Database config:
-//    setupDB()
-
     // Build array of device collections and the attributes we want to report on for that collection:
     //  Note, the collection names are stored as strings. Adding references to the actual collection
     //  objects causes major issues (possibly memory issues?).
@@ -270,50 +267,16 @@ def updated() {
 
     // Configure Scheduling:
     state.softPollingInterval = settings.prefSoftPollingInterval.toInteger()
-//    state.writeInterval = settings.writeInterval
     manageSchedules()
-
-    // Configure Subscriptions:
-//    manageSubscriptions()
 
     // Clean up old state variables
     state.remove("queuedData")
-
-    // Setup sync between static @field value and State.
-//    if (loggerInMemory) {
-//    if (settings.syncDelay == null) {
-//        def  syncDelay2= 20
-//    } else {syncDelay2 = settings.syncDelay }
-//        logger("updated(): SyncDelay is ${syncDelay2}", "info")
-//    runIn(syncDelay2, "stateLoggerSync" )
-//        schedule("0/${syncDelay2} * * * * ?", "stateLoggerSync")
-//    }
-    // Post records that were missed during last update 
-//    if (loggerInMemory && state.loggerQueue.size() > 0) {
-//        logger("updated(): Records Pending write. Posting to InfluxDB", "info")
-//        writeQueuedDataToInfluxDbForce()
-//    }
 
 }
 
 /*****************************************************************************************************************
  *  Event Handlers:
  *****************************************************************************************************************/
-
-/**
- *  handleModeEvent(evt)
- *
- *  Log Mode changes.
- **/
-/* def handleModeEvent(evt) {
-    logger("handleModeEvent(): Mode changed to: ${evt.value}", "info")
-
-    def locationName = escapeStringForInfluxDB(location.name)
-    def mode = '"' + escapeStringForInfluxDB(evt.value) + '"'
-    long eventTimestamp = evt.unixTime * 1e6       // Time is in milliseconds, but InfluxDB expects nanoseconds
-    def data = "_stMode,locationName=${locationName} mode=${mode} ${eventTimestamp}"
-    queueToInfluxDb(data)
-} */
 
 /**
  *  handleEvent(evt)
@@ -607,52 +570,6 @@ def softPoll() {
   writeQueuedDataToInfluxDb()  
 }
 
-/**
- *  logSystemProperties()
- *
- *  Generates measurements for SmartThings system (hubs and locations) properties.
- **/
-/* def logSystemProperties() {
-    logger("logSystemProperties()", "trace")
-
-    def locationName = '"' + escapeStringForInfluxDB(location.name) + '"'
-    long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds when pushed to InfluxDB
-
-    // Location Properties:
-    if (prefLogLocationProperties) {
-        try {
-            def tz = '"' + escapeStringForInfluxDB(location.timeZone.ID.toString()) + '"'
-            def mode = '"' + escapeStringForInfluxDB(location.mode) + '"'
-            def times = getSunriseAndSunset()
-            def srt = '"' + times.sunrise.format("HH:mm", location.timeZone) + '"'
-            def sst = '"' + times.sunset.format("HH:mm", location.timeZone) + '"'
-
-            def data = "_heLocation,locationName=${locationName},latitude=${location.latitude},longitude=${location.longitude},timeZone=${tz} mode=${mode},sunriseTime=${srt},sunsetTime=${sst} ${timeNow}"
-            queueToInfluxDb(data)
-            //log.debug("LocationData = ${data}")
-        } catch (e) {
-            logger("logSystemProperties(): Unable to log Location properties: ${e}", "error")
-        }
-    }
-
-    // Hub Properties:
-    if (prefLogHubProperties) {
-        location.hubs.each { h ->
-            try {
-                def hubName = '"' + escapeStringForInfluxDB(h.name.toString()) + '"'
-                def hubIP = '"' + escapeStringForInfluxDB(h.localIP.toString()) + '"'
-                def firmwareVersion =  '"' + escapeStringForInfluxDB(h.firmwareVersionString) + '"'
-
-                def data = "_heHub,locationName=${locationName},hubName=${hubName},hubIP=${hubIP} firmwareVersion=${firmwareVersion} ${timeNow}"
-                //log.debug("HubData = ${data}")
-                queueToInfluxDb(data)
-            } catch (e) {
-                logger("logSystemProperties(): Unable to log Hub properties: ${e}", "error")
-            }
-        }
-    }
-} */
-
 def queueToInfluxDb(data) {
     // Add timestamp (influxdb does this automatically, but since we're batching writes, we need to add it
     long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds
@@ -671,13 +588,7 @@ def queueToInfluxDb(data) {
     }
     finally {
         mutex.release()
-    }
-
-//    if (queueSize > (settings.prefWriteQueueLimit ?: 5)) {
-//        logger("Queue size is too big, triggering write now", "info")
-//        parent.state.loggerQueue = loggerQueueMem
-//        writeQueuedDataToInfluxDb()
-//    }     
+    }   
 }
 
 def writeQueuedDataToInfluxDb() {
@@ -707,136 +618,9 @@ def writeQueuedDataToInfluxDb() {
 
 }
 
-/* def queueToInfluxDb(data) {
-    loggerQueue = state.loggerQueue
-    if (loggerQueue == null) {
-        // Failsafe if coming from an old version
-        loggerQueue = []
-        state.loggerQueue = loggerQueue
-    }
-
-    loggerQueue.add(data)
-    if (loggerQueue.size() > (settings.prefWriteQueueLimit ?: 100)) {
-        logger("Queue size is too big, triggering write now", "info")
-        writeQueuedDataToInfluxDb()
-    }
-} */
-
-/* def writeQueuedDataToInfluxDbForce() {
-    loggerQueue = state.loggerQueue
-    if (loggerQueue == null) {
-        // Failsafe if coming from an old version
-        return
-    }
-
-    Integer size = loggerQueue.size()
-    if (size == 0) {
-        logger("No queued data to write to InfluxDB", "info")
-        return
-    }
-
-    logger("Writing queued data of size ${size}", "info")
-    String writeData = loggerQueue.toArray().join('\n')
-    postToInfluxDB(writeData)
-    loggerQueue.clear()
-} */
-
-/**
- *  postToInfluxDB()
- *
- *  Posts data to InfluxDB.
- *
- *  Uses hubAction instead of httpPost() in case InfluxDB server is on the same LAN as the Smartthings Hub.
- **/
-/* def postToInfluxDB(data) {
-    if (state.uri == null) {
-        // Failsafe if using an old config
-        setupDB()
-    }
-
-    logger("postToInfluxDB(): Posting data to InfluxDB: ${state.uri}, Data: [${data}]", "info")
-
-    // Hubitat Async http Post
-    try {
-        def postParams = [
-            uri: state.uri,
-            requestContentType: 'application/json',
-            contentType: 'application/json',
-            headers: state.headers,
-            body : data
-        ]
-        asynchttpPost('handleInfluxResponse', postParams)
-    } catch (e) {
-        logger("postToInfluxDB(): Something went wrong when posting: ${e}", "error")
-    }
-} */
-
-/**
- *  handleInfluxResponse()
- *
- *  Handles response from post made in postToInfluxDB().
- **/
-/* def handleInfluxResponse(hubResponse, data) {
-    //logger("postToInfluxDB(): status of post call is: ${hubResponse.status}", "info")
-    if (hubResponse.status >= 400) {
-        logger("postToInfluxDB(): Something went wrong! Response from InfluxDB: Status: ${hubResponse.status}, Headers: ${hubResponse.headers}, Data: ${data}", "error")
-    }
-} */
-
 /*****************************************************************************************************************
  *  Private Helper Functions:
  *****************************************************************************************************************/
-
-/**
- *  setupDB()
- *
- *  Set up the database uri and header state variables.
- **/
-/* private setupDB() {
-    String uri
-    def headers = [:]
-
-    if (settings?.prefDatabaseTls) {
-        uri = "https://"
-    } else {
-        uri = "http://"
-    }
-
-    uri += settings.prefDatabaseHost
-    if (settings?.prefDatabasePort) {
-        uri += ":" + settings.prefDatabasePort
-    }
-
-    if (settings?.prefInfluxVer == "2") {
-        uri += "/api/v2/write?org=${settings.prefOrg}&bucket=${settings.prefBucket}"
-    } else {
-        // Influx version 1
-        uri += "/write?db=${settings.prefDatabaseName}"
-    }
-
-    if (settings.prefAuthType == null || settings.prefAuthType == "basic") {
-        if (settings.prefDatabaseUser && settings.prefDatabasePass) {
-            def userpass = "${settings.prefDatabaseUser}:${settings.prefDatabasePass}"
-            headers.put("Authorization", "Basic " + userpass.bytes.encodeBase64().toString())
-        }
-    } else if (settings.prefAuthType == "token") {
-        headers.put("Authorization", "Token ${settings.prefDatabaseToken}")
-    }
-
-    state.uri = uri
-    state.headers = headers
-
-    logger("New URI: ${uri}", "info")
-
-    // Clean up old state vars if present
-    state.remove("databaseHost")
-    state.remove("databasePort")
-    state.remove("databaseName")
-    state.remove("databasePass")
-    state.remove("databaseUser")
-    state.remove("path")
-} */
-
      
 /**
  *  manageSchedules()
@@ -853,7 +637,6 @@ private manageSchedules() {
 
     try {
         unschedule(softPoll)
-//        unschedule(writeQueuedDataToInfluxDb)
     }
     catch (e) {
         // logger("manageSchedules(): Unschedule failed!", "error")
@@ -864,48 +647,7 @@ private manageSchedules() {
         logger("manageSchedules(): Scheduling softpoll to run every ${state.softPollingInterval} minutes (offset of ${randomOffset} seconds).", "trace")
         schedule("${randomOffset} 0/${state.softPollingInterval} * * * ?", "softPoll")
     }
-
-//    randomOffset = randomOffset + 8
-//    schedule("${randomOffset} 0/${state.writeInterval} * * * ?", "writeQueuedDataToInfluxDb")
 }
-
-/**
- *  manageSubscriptions()
- *
- *  Configures subscriptions.
- **/
-/* private manageSubscriptions() {
-    logger("manageSubscriptions()", "trace")
-
-    // Unsubscribe:
-    unsubscribe()
-
-    // Subscribe to mode events:
-    if (prefLogModeEvents) subscribe(location, "mode", handleModeEvent)
-
-    if (!accessAllAttributes) {
-        // Subscribe to device attributes (iterate over each attribute for each device collection in state.deviceAttributes):
-        def devs // dynamic variable holding device collection.
-        state.deviceAttributes.each { da ->
-            devs = settings."${da.devices}"
-            if (devs && (da.attributes)) {
-                da.attributes.each { attr ->
-                    logger("manageSubscriptions(): Subscribing to attribute: ${attr}, for devices: ${da.devices}", "info")
-                    // There is no need to check if all devices in the collection have the attribute.
-                    subscribe(devs, attr, handleEvent, ["filterEvents": filterEvents])
-                }
-            }
-        }
-    } else {
-        state.selectedAttr.each { entry ->
-            d = getDeviceObj(entry.key)
-            entry.value.each { attr ->
-                logger("manageSubscriptions(): Subscribing to attribute: ${attr}, for device: ${d}", "info")
-                subscribe(d, attr, handleEvent, ["filterEvents": filterEvents])
-            }
-        }
-    }
-} */
 
 /**
  *  logger()
