@@ -43,7 +43,7 @@
  *****************************************************************************************************************/
 
 definition(
-    name: "InfluxDB Logger System",
+    name: "InfluxDB Logger Advanced System",
     namespace: "nowhereville",
     author: "Joshua Marker (tooluser)",
     description: "Log device states to InfluxDB",
