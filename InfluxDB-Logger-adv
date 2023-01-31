@@ -97,10 +97,10 @@ def setupMain() {
         }
 
         section("Logging App Management") {
-            app(name: "Device Monitor", appName: "InfluxDB Logger Advanced Device Monitor", namespace: "nowhereville", title: "Tradditional Event Logging", multiple: true)
+            app(name: "Device Monitor", appName: "InfluxDB Logger Advanced Device Monitor", namespace: "nowhereville", title: "Event Logging", multiple: true)
 //            app(name: "Device Monitor All Attrib", appName: "InfluxDB Logger Advanced Device Monitor All Attrib", namespace: "nowhereville", title: "All Attribute Event Logging < One Job Only", multiple: false)
-            app(name: "Soft Poll Apps", appName: "InfluxDB Logger Advanced Soft Poll", namespace: "nowhereville", title: "Soft Poll App", multiple: true)            
-            app(name: "System Montior", appName: "InfluxDB Logger Advanced System", namespace: "nowhereville", title: "System Monitor < One Job Only", multiple: false)            
+            app(name: "Soft Poll Apps", appName: "InfluxDB Logger Advanced Soft Poll", namespace: "nowhereville", title: "Push Current States (useful graphing of slowly changing/reporting devices)", multiple: true)            
+            app(name: "System Montior", appName: "InfluxDB Logger Advanced System", namespace: "nowhereville", title: "Log Hub Events", multiple: false)            
 
         }
     }
