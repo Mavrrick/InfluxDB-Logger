@@ -58,8 +58,11 @@ definition(
 
     import groovy.transform.Field
 
-    @Field static java.util.concurrent.ConcurrentLinkedQueue loggerQueueMem = new java.util.concurrent.ConcurrentLinkedQueue()
-    @Field static java.util.concurrent.Semaphore mutex = new java.util.concurrent.Semaphore(1)
+    @Field static loggerQueueMap = new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue>()
+
+
+//    @Field static java.util.concurrent.ConcurrentLinkedQueue loggerQueueMem = new java.util.concurrent.ConcurrentLinkedQueue()
+//    @Field static java.util.concurrent.Semaphore mutex = new java.util.concurrent.Semaphore(1)
 
 preferences {
     page(name: "setupMain")
@@ -100,13 +103,17 @@ def setupMain() {
                        
         }
 
+        section("Input Format Preference:") {
+            input "accessAllAttributes", "bool", title:"Get Access To All Attributes?", defaultValue: false, required: true, submitOnChange: true
+        }
 
+        if (!accessAllAttributes) {
             section("Devices To Monitor:", hideable:false) {
                 input "accelerometers", "capability.accelerationSensor", title: "Accelerometers", multiple: true, required: false
                 input "alarms", "capability.alarm", title: "Alarms", multiple: true, required: false
                 input "batteries", "capability.battery", title: "Batteries", multiple: true, required: false
                 input "beacons", "capability.beacon", title: "Beacons", multiple: true, required: false
-                input "buttons", "capability.pushableButton", title: "Buttons", multiple: true, required: false
+                input "buttons", "capability.button", title: "Buttons", multiple: true, required: false
                 input "cos", "capability.carbonMonoxideDetector", title: "Carbon Monoxide Detectors", multiple: true, required: false
                 input "co2s", "capability.carbonDioxideMeasurement", title: "Carbon Dioxide Detectors", multiple: true, required: false
                 input "colors", "capability.colorControl", title: "Color Controllers", multiple: true, required: false
@@ -143,8 +150,30 @@ def setupMain() {
                 input "waterSensors", "capability.waterSensor", title: "Water Sensors", multiple: true, required: false
                 input "windowShades", "capability.windowShade", title: "Window Shades", multiple: true, required: false
             }
-        
-
+        } else {
+            section("Devices To Monitor:", hideable:false) {
+                input name: "allDevices", type: "capability.*", title: "Selected Devices", multiple: true, required: false, submitOnChange: true
+            }
+            state.selectedAttr = [:]
+            settings.allDevices.each { deviceName ->
+                if (deviceName) {
+                    deviceId = deviceName.getId()
+                    attr = deviceName.getSupportedAttributes().unique()
+                    if (attr) {
+                        state.options = []
+                        index = 0
+                        attr.each { at ->
+                            state.options[index] = "${at}"
+                            index = index + 1
+                        }
+                        section("$deviceName", hideable: true) {
+                            input name:"attrForDev$deviceId", type: "enum", title: "$deviceName", options: state.options, multiple: true, required: false, submitOnChange: true
+                        }
+                        state.selectedAttr[deviceId] = settings["attrForDev" + deviceId]
+                    }
+                }
+            }
+        }
         section("Event Subscription Options:") {
             input "filterEvents", "bool", title:"Only log events when the value changes", defaultValue: true, required: true, submitOnChange: true
         }
@@ -512,7 +541,7 @@ def handleEvent(evt) {
  *  Main Commands:
  *****************************************************************************************************************/
 
-def queueToInfluxDb(data) {
+/* def queueToInfluxDb(data) {
     // Add timestamp (influxdb does this automatically, but since we're batching writes, we need to add it
     long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds
     data += " ${timeNow}"
@@ -537,11 +566,33 @@ def queueToInfluxDb(data) {
 
     if (queueSize > (settings.prefWriteQueueLimit ?: 50)) {
         logger("Queue size is too big, triggering write now", "info")
-        writeQueuedDataToInfluxDb()   
+        if (dbWriteController) {
+        writeQueuedDataToInfluxDb()
+        }    
     }     
+} */
+
+def queueToInfluxDb(data) {
+    // Add timestamp (influxdb does this automatically, but since we're batching writes, we need to add it
+    long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds
+    data += " ${timeNow}"
+
+    myLoggerQueue = getLoggerQueue()
+    myLoggerQueue.offer(data)
+    
+    if (settings.syncDelay == 0) {
+        state.loggerQueue = myLoggerQueue
+        }
+
+    int queueSize = queueSize = myLoggerQueue.size()
+
+    if (queueSize > (settings.prefWriteQueueLimit ?: 100)) {
+        logger("Queue size is too big, triggering write now", "info")
+        writeQueuedDataToInfluxDb()
+    }
 }
 
-def writeQueuedDataToInfluxDb() {
+/* def writeQueuedDataToInfluxDb() {
     String writeData = ""
 
     try {
@@ -565,8 +616,38 @@ def writeQueuedDataToInfluxDb() {
     }
 
     logger("Calling Parent App to post ${writeData}", "trace")
+    parent.postToInfluxDB(writeData)    
+} */
+
+def writeQueuedDataToInfluxDb() {
+    myLoggerQueue = getLoggerQueue()
+
+    //logger("Preparing queued data - current queue size = ${myLoggerQueue.size()}", "trace")
+    String writeData = ""
+    int nItems = 0
+    String writeItem = myLoggerQueue.poll()
+    while (writeItem) {
+        writeData += writeItem + '\n'
+        writeItem = myLoggerQueue.poll()
+        nItems++
+        if (nItems > 1000) {
+            // Intention here is to detect a hypothetical situation where events would come in faster than they are consumed (which
+            // would result in infinite looping).  Will test to see if this can ever happen in practice.  Note that breaking out
+            // does not solve the issue, only postpones it, but allows detection.
+            logger("writeQueuedDataToInfluxDb(): breaking out of queue consumption loop","debug")
+            break
+        }
+        loggerQueue = state.loggerQueue
+        loggerQueue.clear()
+    }
+
+    if (writeData == "") {
+        logger("No queued data to write to InfluxDB", "info")
+        return
+    }
+
+    logger("Prepared ${nItems} elements to write out to InfluxDB", "info")
     parent.postToInfluxDB(writeData)
-    
 }
 
 def writeQueuedDataToInfluxDbForce() {
@@ -586,7 +667,7 @@ def writeQueuedDataToInfluxDbForce() {
     String writeData = loggerQueue.toArray().join('\n')
     parent.postToInfluxDB(writeData)
     loggerQueue.clear()
-} 
+}
 
 /*****************************************************************************************************************
  *  Private Helper Functions:
@@ -597,15 +678,15 @@ def writeQueuedDataToInfluxDbForce() {
  * Synchronizes logger queue to state value to minimize data loss
  **/
 private stateLoggerSync(){ 
+    myLoggerQueue = getLoggerQueue()
     logger("stateLoggerSync()", "trace")
-    if (state.loggerQueue.size() < loggerQueueMem.size()) {
-        state.loggerQueue = loggerQueueMem
-    } else if (state.loggerQueue.size() > loggerQueueMem.size()) {
+    if (state.loggerQueue.size() < myLoggerQueue.size()) {
+        state.loggerQueue = myLoggerQueue
+    } else if (state.loggerQueue.size() > myLoggerQueue.size()) {
         writeQueuedDataToInfluxDbForce()
     } else {
           logger("stateLoggerSync() Queues are same size", "trace")  
-    }
-//    runIn(settings.syncDelay, "stateLoggerSync") 
+    } 
 }
      
 
@@ -654,6 +735,7 @@ private manageSubscriptions() {
     // Unsubscribe:
     unsubscribe()
 
+    if (!accessAllAttributes) {
         // Subscribe to device attributes (iterate over each attribute for each device collection in state.deviceAttributes):
         def devs // dynamic variable holding device collection.
         state.deviceAttributes.each { da ->
@@ -662,10 +744,19 @@ private manageSubscriptions() {
                 da.attributes.each { attr ->
                     logger("manageSubscriptions(): Subscribing to attribute: ${attr}, for devices: ${da.devices}", "info")
                     // There is no need to check if all devices in the collection have the attribute.
-                    subscribe(devs, attr, handleEvent, ["filterEvents": filterEvents])
+                    subscribe(devs, attr, handleEvent)
                 }
             }
         }
+    } else {
+        state.selectedAttr.each { entry ->
+            d = getDeviceObj(entry.key)
+            entry.value.each { attr ->
+                logger("manageSubscriptions(): Subscribing to attribute: ${attr}, for device: ${d}", "info")
+                subscribe(d, attr, handleEvent)
+            }
+        }
+    }
 }
 
 /**
@@ -725,4 +816,26 @@ private String escapeStringForInfluxDB(String str) {
         str = 'null'
     }
     return str
+}
+
+private getLoggerQueue() {
+    defaultQueue = new java.util.concurrent.ConcurrentLinkedQueue()
+    queue = loggerQueueMap.putIfAbsent(app.getId(), defaultQueue)
+    if (queue == null) {
+        // key was not in map - return defaultQueue
+        logger("allocating new queue for app","warn")
+        return defaultQueue
+    }
+    // key was already in map - return that.
+    return queue
+}
+
+// Attempt to clean up the ConcurrentLinkedQueue object.
+// Only called by uninstalled(), so should be safe.
+private releaseLoggerQueue()
+{
+    // Flush queue just before we release it,
+    writeQueuedDataToInfluxDb()
+    loggerQueueMap.remove(app.getId())
+    logger("released queue for app id ${app.getId()}", "info")
 }
