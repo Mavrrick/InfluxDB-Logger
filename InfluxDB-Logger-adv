@@ -100,7 +100,7 @@ def setupMain() {
             app(name: "Device Monitor", appName: "InfluxDB Logger Advanced Device Monitor", namespace: "nowhereville", title: "Tradditional Event Logging", multiple: true)
 //            app(name: "Device Monitor All Attrib", appName: "InfluxDB Logger Advanced Device Monitor All Attrib", namespace: "nowhereville", title: "All Attribute Event Logging < One Job Only", multiple: false)
             app(name: "Soft Poll Apps", appName: "InfluxDB Logger Advanced Soft Poll", namespace: "nowhereville", title: "Soft Poll App", multiple: true)            
-            app(name: "System Montior", appName: "InfluxDB Logger System", namespace: "nowhereville", title: "System Monitor < One Job Only", multiple: false)            
+            app(name: "System Montior", appName: "InfluxDB Logger Advanced System", namespace: "nowhereville", title: "System Monitor < One Job Only", multiple: false)            
 
         }
     }
