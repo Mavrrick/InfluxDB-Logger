@@ -48,105 +48,42 @@ definition(
     author: "Joshua Marker (tooluser)",
     description: "Log device states to InfluxDB",
     category: "My Apps",
+    installOnOpen: "true",
+    singleInstance: "true",
     importUrl: "https://raw.githubusercontent.com/HubitatCommunity/InfluxDB-Logger/master/influxdb-logger.groovy",
     iconUrl: "",
     iconX2Url: "",
-    iconX3Url: "",
 )
 
     import groovy.transform.Field
 
 preferences {
     page(name: "setupMain")
-    page(name: "connectionPage")
 }
 
 def setupMain() {
     dynamicPage(name: "setupMain", title: "InfluxDB Logger Settings", install: true, uninstall: true) {
-        section("") {
-            input "appName", "text", title: "Aplication Name", multiple: false, required: false, submitOnChange: true, defaultValue: app.getLabel()
-
-            href(
-                name: "href",
-                title: "Connection Settings",
-                description : prefDatabaseHost == null ? "Configure database connection parameters" : prefDatabaseHost,
-                required: true,
-                page: "connectionPage"
-            )
-
-            input(
-                name: "configLoggingLevelIDE",
-                title: "IDE Live Logging Level:\nMessages with this level and higher will be logged to the IDE.",
-                type: "enum",
-                options: [
-                    "0" : "None",
-                    "1" : "Error",
-                    "2" : "Warning",
-                    "3" : "Info",
-                    "4" : "Debug",
-                    "5" : "Trace"
-                ],
-                defaultValue: "3",
-                displayDuringSetup: true,
-                required: false
-            )
-        }
-
         section("Logging App Management") {
-            app(name: "Device Monitor", appName: "InfluxDB Logger Advanced Device Monitor", namespace: "nowhereville", title: "Event Logging", multiple: true)
-            app(name: "Soft Poll Apps", appName: "InfluxDB Logger Advanced Soft Poll", namespace: "nowhereville", title: "Push Current States (useful graphing of slowly changing/reporting devices)", multiple: true)            
-            app(name: "System Montior", appName: "InfluxDB Logger Advanced System", namespace: "nowhereville", title: "Log Hub Events", multiple: false)            
-
+            app(name: "Manager", appName: "InfluxDB Logger Advanced Manager", namespace: "nowhereville", title: "Create InfluxDB Logger Instance", multiple: true)
+/*            input "addChildAppButton" , "button",  title: "Click here to create a new InfluxDb Logger Instance"
+//            input "addChildlist" , "button",  title: "Click her to list child apps"
+            if (state.appCreate == true) {
+            state.appCreate = false
+//            href url: "/installedapp/configure/${state.newApp}/setupMain", title: "Please configure Me", description: ""
+                paragraph "<script>{window.open('/installedapp/configure/${state.newApp}/setupMain?resetScroll=true', '_self')}</script>"
+            }
         }
+        section("Manage App Instances") {
+            children = app?.getChildApps() 
+            children.each {
+                id = it.id 
+                label = it.label
+                href url: "/installedapp/configure/$id/setupMain", title: label, description: ""
+            } */ 
+        } 
     }
 }
 
-def connectionPage() {
-    dynamicPage(name: "connectionPage", title: "Connection Properties", install: false, uninstall: false) {
-        section {
-            input "prefDatabaseTls", "bool", title:"Use TLS?", defaultValue: false, required: true
-            input "prefDatabaseHost", "text", title: "Host", defaultValue: "192.168.1.100", required: true
-            input "prefDatabasePort", "text", title : "Port", defaultValue : prefDatabaseTls ? "443" : "8086", required : false
-            input(
-                name: "prefInfluxVer",
-                title: "Influx Version",
-                type: "enum",
-                options: [
-                    "1" : "v1.x",
-                    "2" : "v2.x"
-                ],
-                defaultValue: "1",
-                submitOnChange: true,
-                required: true
-            )
-            if (prefInfluxVer == "1") {
-                input "prefDatabaseName", "text", title: "Database Name", defaultValue: "Hubitat", required: true
-            } else if (prefInfluxVer == "2") {
-                input "prefOrg", "text", title: "Org", defaultValue: "", required: true
-                input "prefBucket", "text", title: "Bucket", defaultValue: "", required: true
-            }
-            input(
-                name: "prefAuthType",
-                title: "Authorization Type",
-                type: "enum",
-                options: [
-                    "none" : "None",
-                    "basic" : "Username / Password",
-                    "token" : "Token"
-                ],
-                defaultValue: "none",
-                submitOnChange: true,
-                required: true
-            )
-            if (prefAuthType == "basic") {
-                input "prefDatabaseUser", "text", title: "Username", defaultValue: "", required: false
-                input "prefDatabasePass", "text", title: "Password", defaultValue: "", required: false
-            } else if (prefAuthType == "token") {
-                input "prefDatabaseToken", "text", title: "Token", required: true
-            }
-        }
-    }
-}
 
 
 /**
@@ -182,59 +119,13 @@ def uninstalled() {
  **/
 def updated() {
     logger("updated()", "trace")
-    unschedule(stateLoggerSync)
 
     // Update application name
-    app.updateLabel(appName + ":" + prefDatabaseHost)
+    app.updateLabel(appName)
 
     // Update internal state:
     state.loggingLevelIDE = (settings.configLoggingLevelIDE) ? settings.configLoggingLevelIDE.toInteger() : 3
 
-    // Database config:
-    setupDB()
-
-}
-
-/**
- *  postToInfluxDB()
- *
- *  Posts data to InfluxDB.
- *
- *  Uses hubAction instead of httpPost() in case InfluxDB server is on the same LAN as the Smartthings Hub.
- **/
-def postToInfluxDB(data) {
-    if (state.uri == null) {
-        // Failsafe if using an old config
-        setupDB()
-    }
-
-    logger("postToInfluxDB(): Posting data to InfluxDB: ${state.uri}, Data: [${data}]", "info")
-
-    // Hubitat Async http Post
-    try {
-        def postParams = [
-            uri: state.uri,
-            requestContentType: 'application/json',
-            contentType: 'application/json',
-            headers: state.headers,
-            body : data
-        ]
-        asynchttpPost('handleInfluxResponse', postParams)
-    } catch (e) {
-        logger("postToInfluxDB(): Something went wrong when posting: ${e}", "error")
-    }
-}
-
-/**
- *  handleInfluxResponse()
- *
- *  Handles response from post made in postToInfluxDB().
- **/
-def handleInfluxResponse(hubResponse, data) {
-    //logger("postToInfluxDB(): status of post call is: ${hubResponse.status}", "info")
-    if (hubResponse.status >= 400) {
-        logger("postToInfluxDB(): Something went wrong! Response from InfluxDB: Status: ${hubResponse.status}, Headers: ${hubResponse.headers}, Data: ${data}", "error")
-    }
 }
 
 /*****************************************************************************************************************
@@ -246,49 +137,23 @@ def handleInfluxResponse(hubResponse, data) {
  *
  *  Set up the database uri and header state variables.
  **/
-private setupDB() {
-    String uri
-    def headers = [:]
 
-    if (settings?.prefDatabaseTls) {
-        uri = "https://"
-    } else {
-        uri = "http://"
+private def appButtonHandler(button) {
+//    if (button == "addChildAppButton") {
+    log.debug "attempting to create child app"
+    app?.addChildApp("nowhereville", "InfluxDB Logger Advanced Wrapped", "Please configure Me", properties = null)
+    newApp = (app?.getChildAppByLabel("Please configure Me")).id
+ /*   newAppLabel = (app?.getChildAppByLabel("InfluxDB Logger Advanced Wrapped")).label
+    log.debug "child app info :${newApp}"
+    appURL = "/installedapp/configure/" + newApp + "/setupMain"
+    log.debug "URL to use is ${appURL}"
+        href url: "/installedapp/configure/${newApp}/setupMain", title: newAppLabel, description: ""
     }
-
-    uri += settings.prefDatabaseHost
-    if (settings?.prefDatabasePort) {
-        uri += ":" + settings.prefDatabasePort
-    }
-
-    if (settings?.prefInfluxVer == "2") {
-        uri += "/api/v2/write?org=${settings.prefOrg}&bucket=${settings.prefBucket}"
-    } else {
-        // Influx version 1
-        uri += "/write?db=${settings.prefDatabaseName}"
-    }
-
-    if (settings.prefAuthType == null || settings.prefAuthType == "basic") {
-        if (settings.prefDatabaseUser && settings.prefDatabasePass) {
-            def userpass = "${settings.prefDatabaseUser}:${settings.prefDatabasePass}"
-            headers.put("Authorization", "Basic " + userpass.bytes.encodeBase64().toString())
-        }
-    } else if (settings.prefAuthType == "token") {
-        headers.put("Authorization", "Token ${settings.prefDatabaseToken}")
-    }
-
-    state.uri = uri
-    state.headers = headers
-
-    logger("New URI: ${uri}", "info")
-
-    // Clean up old state vars if present
-    state.remove("databaseHost")
-    state.remove("databasePort")
-    state.remove("databaseName")
-    state.remove("databasePass")
-    state.remove("databaseUser")
-    state.remove("path")
+    else {
+        href url: "/installedapp/configure/802/setupMain", title: newAppLabel, descriptoin: ""
+    } */
+    state.appCreate = true
+    state.newApp = newApp
 }
 
 /**
