@@ -185,7 +185,7 @@ def updated() {
     unschedule(stateLoggerSync)
 
     // Update application name
-    app.updateLabel(appName)
+    app.updateLabel(appName + ":" + prefDatabaseHost)
 
     // Update internal state:
     state.loggingLevelIDE = (settings.configLoggingLevelIDE) ? settings.configLoggingLevelIDE.toInteger() : 3
