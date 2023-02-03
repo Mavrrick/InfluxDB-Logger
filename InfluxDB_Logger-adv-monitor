@@ -53,16 +53,11 @@ definition(
     iconUrl: "",
     iconX2Url: "",
     iconX3Url: "",
-//    singleThreaded: true
 )
 
     import groovy.transform.Field
 
     @Field static loggerQueueMap = new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue>()
-
-
-//    @Field static java.util.concurrent.ConcurrentLinkedQueue loggerQueueMem = new java.util.concurrent.ConcurrentLinkedQueue()
-//    @Field static java.util.concurrent.Semaphore mutex = new java.util.concurrent.Semaphore(1)
 
 preferences {
     page(name: "setupMain")
@@ -95,7 +90,7 @@ def setupMain() {
         section("Event Database Write Management") {
             
             input "writeInterval", "enum", title:"How often to write to db (minutes)", defaultValue: "5", required: true,
-                options: ["1",  "2", "3", "4", "5", "10", "15"]
+                options: ["1",  "2", "3", "4", "5", "10", "15"] 
 
             input "prefWriteQueueLimit", "number", title:"Write Interval Queue Size Limit", defaultValue: 50, required: true
             
@@ -113,7 +108,7 @@ def setupMain() {
                 input "alarms", "capability.alarm", title: "Alarms", multiple: true, required: false
                 input "batteries", "capability.battery", title: "Batteries", multiple: true, required: false
                 input "beacons", "capability.beacon", title: "Beacons", multiple: true, required: false
-                input "buttons", "capability.button", title: "Buttons", multiple: true, required: false
+                input "buttons", "capability.pushableButton", title: "Buttons", multiple: true, required: false
                 input "cos", "capability.carbonMonoxideDetector", title: "Carbon Monoxide Detectors", multiple: true, required: false
                 input "co2s", "capability.carbonDioxideMeasurement", title: "Carbon Dioxide Detectors", multiple: true, required: false
                 input "colors", "capability.colorControl", title: "Color Controllers", multiple: true, required: false
@@ -233,9 +228,6 @@ def updated() {
     // Update internal state:
     state.loggingLevelIDE = (settings.configLoggingLevelIDE) ? settings.configLoggingLevelIDE.toInteger() : 3
 
-    // Database config:
-//    setupDB()
-
     // Build array of device collections and the attributes we want to report on for that collection:
     //  Note, the collection names are stored as strings. Adding references to the actual collection
     //  objects causes major issues (possibly memory issues?).
@@ -281,10 +273,7 @@ def updated() {
     state.deviceAttributes << [ devices: 'waterSensors', attributes: ['water']]
     state.deviceAttributes << [ devices: 'windowShades', attributes: ['windowShade']]
 
-    // Configure Scheduling:
-//    state.softPollingInterval = settings.prefSoftPollingInterval.toInteger()
-
-
+    // Configure Schedules
     state.writeInterval = settings.writeInterval
         manageSchedules() 
 
@@ -292,18 +281,6 @@ def updated() {
     // Configure Subscriptions:
     manageSubscriptions()
 
-    // Clean up old state variables
-//    state.remove("queuedData")
-
-    // Setup sync between static @field value and State.
-//    if (loggerInMemory) {
-//    if (settings.syncDelay == null) {
-//        def  syncDelay2= 20
-//    } else {syncDelay2 = settings.syncDelay }
-//        logger("updated(): SyncDelay is ${syncDelay2}", "info")
-//    runIn(syncDelay2, "stateLoggerSync" )
-//        schedule("0/${settings.syncDelay} * * * * ?", "stateLoggerSync")
-//    }
     // Post records that were missed during last update 
     if (state.loggerQueue.size() > 0) {
         logger("updated(): Records Pending write. Posting to InfluxDB", "info")
@@ -541,41 +518,7 @@ def handleEvent(evt) {
  *  Main Commands:
  *****************************************************************************************************************/
 
-/* def queueToInfluxDb(data) {
-    // Add timestamp (influxdb does this automatically, but since we're batching writes, we need to add it
-//    long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds
-//    data += " ${timeNow}"
-
-    int queueSize = 0
-    try {
-        mutex.acquire()
-        logger("queueToInfluxDb(): loggerQueueMem = ${loggerQueueMem}", "trace")
-        loggerQueueMem.offer(data)
-        if (settings.syncDelay == 0) {
-            state.loggerQueue = loggerQueueMem
-        }
-        queueSize = loggerQueueMem.size()
-        logger("queueToInfluxDb(): loggerQueueMem = ${loggerQueueMem.size()} size ", "trace")
-    }
-    catch (e) {
-        logger("Error 2 in queueToInfluxDb", "Warning")
-    }
-    finally {
-        mutex.release()
-    }
-
-    if (queueSize > (settings.prefWriteQueueLimit ?: 50)) {
-        logger("Queue size is too big, triggering write now", "info")
-        if (dbWriteController) {
-        writeQueuedDataToInfluxDb()
-        }    
-    }     
-} */
-
 def queueToInfluxDb(data) {
-    // Add timestamp (influxdb does this automatically, but since we're batching writes, we need to add it
-//    long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds
-//    data += " ${timeNow}"
 
     myLoggerQueue = getLoggerQueue()
     myLoggerQueue.offer(data)
@@ -591,33 +534,6 @@ def queueToInfluxDb(data) {
         writeQueuedDataToInfluxDb()
     }
 }
-
-/* def writeQueuedDataToInfluxDb() {
-    String writeData = ""
-
-    try {
-        mutex.acquire()
-
-        if (loggerQueueMem.size() == 0) {
-            logger("No queued data to write to InfluxDB", "info")
-            return
-        }
-        logger("Writing queued data of size ${loggerQueueMem.size()} out", "info")
-        writeData = loggerQueueMem.toArray().join('\n')
-        loggerQueueMem.clear()
-        loggerQueue = state.loggerQueue
-        loggerQueue.clear()
-    }
-    catch (e) {
-        logger("Error 2 in writeQueuedDataToInfluxDb", "Warning")
-    }
-    finally {
-        mutex.release()
-    }
-
-    logger("Calling Parent App to post ${writeData}", "trace")
-    parent.postToInfluxDB(writeData)    
-} */
 
 def writeQueuedDataToInfluxDb() {
     myLoggerQueue = getLoggerQueue()
@@ -824,6 +740,10 @@ private getLoggerQueue() {
     if (queue == null) {
         // key was not in map - return defaultQueue
         logger("allocating new queue for app","warn")
+            if (state.loggerQueue.size() > 0) {
+                logger("getLoggerQueue(): Records Pending write. Posting to InfluxDB", "info")
+                writeQueuedDataToInfluxDbForce()
+            }
         return defaultQueue
     }
     // key was already in map - return that.
