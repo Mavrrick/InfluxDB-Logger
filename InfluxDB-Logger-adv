@@ -52,13 +52,9 @@ definition(
     iconUrl: "",
     iconX2Url: "",
     iconX3Url: "",
-//    singleThreaded: true
 )
 
     import groovy.transform.Field
-
-//    @Field static java.util.concurrent.ConcurrentLinkedQueue loggerQueueMem = new java.util.concurrent.ConcurrentLinkedQueue()
-//    @Field static java.util.concurrent.Semaphore mutex = new java.util.concurrent.Semaphore(1)
 
 preferences {
     page(name: "setupMain")
@@ -98,7 +94,6 @@ def setupMain() {
 
         section("Logging App Management") {
             app(name: "Device Monitor", appName: "InfluxDB Logger Advanced Device Monitor", namespace: "nowhereville", title: "Event Logging", multiple: true)
-//            app(name: "Device Monitor All Attrib", appName: "InfluxDB Logger Advanced Device Monitor All Attrib", namespace: "nowhereville", title: "All Attribute Event Logging < One Job Only", multiple: false)
             app(name: "Soft Poll Apps", appName: "InfluxDB Logger Advanced Soft Poll", namespace: "nowhereville", title: "Push Current States (useful graphing of slowly changing/reporting devices)", multiple: true)            
             app(name: "System Montior", appName: "InfluxDB Logger Advanced System", namespace: "nowhereville", title: "Log Hub Events", multiple: false)            
 
@@ -162,7 +157,6 @@ def connectionPage() {
 def installed() {
     state.installedAt = now()
     state.loggingLevelIDE = 5
-    state.loggerQueue = []
     updated()
     log.info "${app.label}: Installed with settings: ${settings}"
 }
@@ -200,77 +194,6 @@ def updated() {
     setupDB()
 
 }
-
-/*****************************************************************************************************************
- *  Event Handlers:
- *****************************************************************************************************************/
-
-/**
- *  handleModeEvent(evt)
- *
- *  Log Mode changes.
- **/
-def handleModeEvent(evt) {
-    logger("handleModeEvent(): Mode changed to: ${evt.value}", "info")
-
-    def locationName = escapeStringForInfluxDB(location.name)
-    def mode = '"' + escapeStringForInfluxDB(evt.value) + '"'
-    long eventTimestamp = evt.unixTime * 1e6       // Time is in milliseconds, but InfluxDB expects nanoseconds
-    def data = "_stMode,locationName=${locationName} mode=${mode} ${eventTimestamp}"
-    queueToInfluxDb(data)
-}
-
-/*****************************************************************************************************************
- *  Main Commands:
- *****************************************************************************************************************/
-
-/**
- *  logSystemProperties()
- *
- *  Generates measurements for SmartThings system (hubs and locations) properties.
- **/
-def logSystemProperties() {
-    logger("logSystemProperties()", "trace")
-
-    def locationName = '"' + escapeStringForInfluxDB(location.name) + '"'
-    long timeNow = (new Date().time) * 1e6 // Time is in milliseconds, needs to be in nanoseconds when pushed to InfluxDB
-
-    // Location Properties:
-    if (prefLogLocationProperties) {
-        try {
-            def tz = '"' + escapeStringForInfluxDB(location.timeZone.ID.toString()) + '"'
-            def mode = '"' + escapeStringForInfluxDB(location.mode) + '"'
-            def times = getSunriseAndSunset()
-            def srt = '"' + times.sunrise.format("HH:mm", location.timeZone) + '"'
-            def sst = '"' + times.sunset.format("HH:mm", location.timeZone) + '"'
-
-            def data = "_heLocation,locationName=${locationName},latitude=${location.latitude},longitude=${location.longitude},timeZone=${tz} mode=${mode},sunriseTime=${srt},sunsetTime=${sst} ${timeNow}"
-            queueToInfluxDb(data)
-            //log.debug("LocationData = ${data}")
-        } catch (e) {
-            logger("logSystemProperties(): Unable to log Location properties: ${e}", "error")
-        }
-    }
-
-    // Hub Properties:
-    if (prefLogHubProperties) {
-        location.hubs.each { h ->
-            try {
-                def hubName = '"' + escapeStringForInfluxDB(h.name.toString()) + '"'
-                def hubIP = '"' + escapeStringForInfluxDB(h.localIP.toString()) + '"'
-                def firmwareVersion =  '"' + escapeStringForInfluxDB(h.firmwareVersionString) + '"'
-
-                def data = "_heHub,locationName=${locationName},hubName=${hubName},hubIP=${hubIP} firmwareVersion=${firmwareVersion} ${timeNow}"
-                //log.debug("HubData = ${data}")
-                queueToInfluxDb(data)
-            } catch (e) {
-                logger("logSystemProperties(): Unable to log Hub properties: ${e}", "error")
-            }
-        }
-    }
-}
-
-
 
 /**
  *  postToInfluxDB()
