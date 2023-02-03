@@ -48,7 +48,7 @@ definition(
     author: "Joshua Marker (tooluser)",
     description: "Log device states to InfluxDB",
     category: "My Apps",
-    parent: "nowhereville:InfluxDB Logger Advanced",
+    parent: "nowhereville:InfluxDB Logger Advanced Manager",
     importUrl: "https://raw.githubusercontent.com/HubitatCommunity/InfluxDB-Logger/master/influxdb-logger.groovy",
     iconUrl: "",
     iconX2Url: "",
